@@ -1,7 +1,6 @@
 import json
-import httplib2
 from oauth2client.client import SignedJwtAssertionCredentials
-from httplib2 import Http
+from httplib2 import Http, HttpLib2Error
 from googleapiclient import discovery
 from googleapiclient import http
 from googleapiclient import errors
@@ -9,7 +8,7 @@ from io import BytesIO
 
 
 DEFAULT_BUCKET = 'blkdev_1'
-RETRYABLE_ERRORS = (httplib2.HttpLib2Error, IOError)
+RETRYABLE_ERRORS = (HttpLib2Error, IOError)
 MAX_RETRIES = 5
 KB_4 = 4 * 1024
 
@@ -19,7 +18,7 @@ def get_gcs():
     Gets a handle to the Google Cloud Storage service
     :return: handle to be used in subsequent calls
     """
-    with open('cloud_backup_secret.json') as f:
+    with open('/home/wspeirs/src/cldblkdev/cloud_backup_secret.json') as f:
         secrets = json.load(f)
 
     credentials = SignedJwtAssertionCredentials(secrets['client_email'],
@@ -42,12 +41,15 @@ def list(gcs, bucket=DEFAULT_BUCKET):
 
     json = gcs.objects().list(bucket=bucket, projection='noAcl').execute()
 
-    ret += [x['name'] for x in json['items']]
+    if 'items' in json:
+        ret += [int(x['name']) for x in json['items']]
+    else:
+        return ret
 
     while 'nextPageToken' in json:
         json = gcs.objects().list(bucket=bucket, projection='noAcl', pageToken=json['nextPageToken']).execute()
 
-        ret += [x['name'] for x in json['items']]
+        ret += [int(x['name']) for x in json['items']]
 
     return ret
 
@@ -73,6 +75,8 @@ def get(gcs, file_name, bucket=DEFAULT_BUCKET, chunk_size=KB_4):
             print "Progress: %d%%\tDone: %s" % (int(progress.progress()*100), str(done))
         except errors.HttpError as err:
             print err
+            if err.resp.status == 404:
+                return bytearray("\0" * KB_4)
             if err.resp.status < 500:
                 raise
         except RETRYABLE_ERRORS as err:
